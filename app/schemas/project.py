@@ -3,6 +3,7 @@
 from pydantic import BaseModel, ConfigDict
 
 from app.schemas.technology import TechnologyResponse
+from app.schemas.skill import SkillResponse
 
 
 class ProjectCreate(BaseModel):
@@ -25,5 +26,7 @@ class ProjectResponse(BaseModel):
     image_thumbnail_url: str
     description:str
     technologies: list["TechnologyResponse"] | None = None
+    skills: list["SkillResponse"] | None = None
+
 
     model_config = ConfigDict(from_attributes=True)

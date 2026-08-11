@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.database import Base
@@ -19,7 +19,7 @@ class Project(Base):
                                     unique=True)
     github_url: Mapped[str] = mapped_column(String(200))
     image_thumbnail_url: Mapped[str] = mapped_column(String(200))
-    description: Mapped[str] = mapped_column(String(250))
+    description: Mapped[str] = mapped_column(Text)
     technologies: Mapped[list["Technology"]] = relationship(
         secondary="project_technologies", back_populates="projects")
     skills: Mapped[list["Skill"]] = relationship(

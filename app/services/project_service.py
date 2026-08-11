@@ -66,6 +66,10 @@ class ProjectService:
     def delete(self, project:Project) -> None:
         self.project_repository.delete(project)
 
+    def get_technologies(self, project_id: int):
+        project = self.get_by_id(project_id)
+        return project.technologies
+
     def add_technology(self, project_id: int, technology_id: int) -> None:
         self.get_by_id(project_id)
         technology = self.technology_repository.get_by_id(technology_id)
@@ -83,6 +87,10 @@ class ProjectService:
         if not self.project_technology_repository.exists(project_id, technology_id):
             raise ProjectTechnologyNotFoundError(project_id, technology_id)
         self.project_technology_repository.delete(project_id, technology_id)
+
+    def get_skills(self, project_id: int):
+        project = self.get_by_id(project_id)
+        return project.skills
 
     def add_skill(self, project_id: int, skill_id: int) -> None:
         self.get_by_id(project_id)

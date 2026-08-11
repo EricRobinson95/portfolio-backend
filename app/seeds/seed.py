@@ -2,6 +2,21 @@ from sqlalchemy.orm import Session
 
 from app.database.database import SessionLocal
 
+# =====================================================
+# SQLAlchemy Models
+# =====================================================
+
+import app.models.project
+import app.models.technology
+import app.models.project_technology
+import app.models.project_image
+import app.models.skill
+import app.models.project_skill
+
+# =====================================================
+# Seed Data
+# =====================================================
+
 from app.seeds.projects_seed import PROJECTS
 from app.seeds.technologies_seed import TECHNOLOGIES
 from app.seeds.skills_seed import SKILLS

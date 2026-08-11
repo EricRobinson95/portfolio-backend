@@ -1,12 +1,13 @@
-from app.schemas.project import ProjectCreate
+from app.models.project import Project
 
-PROJECTS: list[ProjectCreate] = [
+
+PROJECTS: list[Project] = [
 
     # =====================================================
     # Project 1 - Enterprise Network Infrastructure
     # =====================================================
 
-    ProjectCreate(
+    Project(
         title="Enterprise Network Infrastructure",
         github_url="https://github.com/EricRobinson95/Cisco-networking-lab",
         image_thumbnail_url="/static/images/projects/enterprise-network-infrastructure/thumbnail.png",
@@ -22,7 +23,7 @@ PROJECTS: list[ProjectCreate] = [
     # Project 2 - Enterprise Hybrid Cloud Platform
     # =====================================================
 
-    ProjectCreate(
+    Project(
         title="Enterprise Hybrid Cloud Platform",
         github_url="https://github.com/EricRobinson95/enterprise-hybrid-cloud-platform",
         image_thumbnail_url="/static/images/projects/enterprise-hybrid-cloud-platform/thumbnail.png",
@@ -38,7 +39,7 @@ PROJECTS: list[ProjectCreate] = [
     # Project 3 - Enterprise Infrastructure Automation
     # =====================================================
 
-    ProjectCreate(
+    Project(
         title="Enterprise Infrastructure Automation",
         github_url="https://github.com/EricRobinson95/enterprise-hybrid-cloud-Infrastructure-automation",
         image_thumbnail_url="/static/images/projects/enterprise-infrastructure-automation/thumbnail.png",
@@ -54,7 +55,7 @@ PROJECTS: list[ProjectCreate] = [
     # Project 4 - Portfolio Web Application Backend
     # =====================================================
 
-    ProjectCreate(
+    Project(
         title="Portfolio Web Application Backend",
         github_url="https://github.com/EricRobinson95/portfolio-backend",
         image_thumbnail_url="/static/images/projects/portfolio-backend/thumbnail.png",
@@ -70,7 +71,7 @@ PROJECTS: list[ProjectCreate] = [
     # Project 5 - Portfolio Web Application Frontend
     # =====================================================
 
-    ProjectCreate(
+    Project(
         title="Portfolio Web Application Frontend",
         github_url="https://github.com/EricRobinson95/portfolio-frontend",
         image_thumbnail_url="/static/images/projects/portfolio-frontend/thumbnail.png",

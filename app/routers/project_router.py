@@ -4,6 +4,8 @@ from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services.project_service import ProjectService
 from app.dependencies.project_image_dependencies import get_project_image_service
 from app.schemas.project_images import ProjectImageResponse
+from app.schemas.technology import TechnologyResponse
+from app.schemas.skill import SkillResponse
 from app.services.project_image_service import ProjectImageService
 
 router = APIRouter(
@@ -67,8 +69,16 @@ def add_technology(
     technology_id: int,
     service: ProjectService = Depends(get_project_service),
     ):
-    project = service.add_technology(project_id, technology_id)
+    service.add_technology(project_id, technology_id)
     return None
+
+@router.get("/{project_id}/technologies",
+            response_model=list[TechnologyResponse])
+def get_project_technologies(
+    project_id: int,
+    service: ProjectService = Depends(get_project_service),
+):
+    return service.get_technologies(project_id)
 
 @router.delete("/{project_id}/technologies/{technology_id}",
             status_code=204)
@@ -87,8 +97,16 @@ def add_skill(
     skill_id: int,
     service: ProjectService = Depends(get_project_service),
     ):
-    project = service.add_skill(project_id, skill_id)
+    service.add_skill(project_id, skill_id)
     return None
+
+@router.get("/{project_id}/skills",
+            response_model=list[SkillResponse])
+def get_project_skills(
+    project_id: int,
+    service: ProjectService = Depends(get_project_service),
+):
+    return service.get_skills(project_id)
 
 @router.delete("/{project_id}/skills/{skill_id}",
             status_code=204)
