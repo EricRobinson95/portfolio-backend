@@ -22,8 +22,12 @@ class ProjectTechnologyRepository:
             project_id=project_id,
             technology_id=technology_id
         )
-        self.db.add(project_technology)
-        self.db.commit()
+        try:
+            self.db.add(project_technology)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
 
     def delete(self, project_id:int, technology_id:int) -> None:
@@ -33,5 +37,9 @@ class ProjectTechnologyRepository:
         )
         result = self.db.execute(statement)
         project_technology = result.scalars().first()
-        self.db.delete(project_technology)
-        self.db.commit()
+        try:
+            self.db.delete(project_technology)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise

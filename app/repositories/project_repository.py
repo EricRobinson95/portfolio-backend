@@ -9,10 +9,14 @@ class ProjectRepository:
         self.db = db
 
     def create(self, project: Project) -> Project:
-        self.db.add(project)
-        self.db.commit()
-        self.db.refresh(project)
-        return project
+        try:
+            self.db.add(project)
+            self.db.commit()
+            self.db.refresh(project)
+            return project
+        except Exception:
+            self.db.rollback()
+            raise
 
     def get_by_id(self, project_id: int) -> Project | None:
         return self.db.get(Project, project_id)
@@ -30,10 +34,18 @@ class ProjectRepository:
         return results.scalars().one_or_none()
 
     def update(self, project: Project) -> Project:
-        self.db.commit()
-        self.db.refresh(project)
-        return project
+        try:
+            self.db.commit()
+            self.db.refresh(project)
+            return project
+        except Exception:
+            self.db.rollback()
+            raise
 
     def delete(self, project: Project) -> None:
-        self.db.delete(project)
-        self.db.commit()
+        try:
+            self.db.delete(project)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise

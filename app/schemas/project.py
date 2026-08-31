@@ -1,7 +1,8 @@
 
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
+from app.core.config import settings
 from app.schemas.technology import TechnologyResponse
 from app.schemas.skill import SkillResponse
 
@@ -28,5 +29,8 @@ class ProjectResponse(BaseModel):
     technologies: list["TechnologyResponse"] | None = None
     skills: list["SkillResponse"] | None = None
 
+    @field_serializer("image_thumbnail_url")
+    def serialize_thumbnail_url(self, image_thumbnail_url: str) -> str:
+        return settings.asset_url(image_thumbnail_url)
 
     model_config = ConfigDict(from_attributes=True)

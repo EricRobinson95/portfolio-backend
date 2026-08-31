@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
+
+from app.core.config import settings
 
 
 class ProjectImageCreate(BaseModel):
@@ -23,5 +25,8 @@ class ProjectImageResponse(BaseModel):
     image_url: str
     display_order: int
 
+    @field_serializer("image_url")
+    def serialize_image_url(self, image_url: str) -> str:
+        return settings.asset_url(image_url)
 
     model_config = ConfigDict(from_attributes=True)

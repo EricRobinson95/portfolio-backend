@@ -10,10 +10,14 @@ class SkillRepository:
         self.db = db
 
     def create(self, skill: Skill) -> Skill:
-        self.db.add(skill)
-        self.db.commit()
-        self.db.refresh(skill)
-        return skill
+        try:
+            self.db.add(skill)
+            self.db.commit()
+            self.db.refresh(skill)
+            return skill
+        except Exception:
+            self.db.rollback()
+            raise
 
     def get_by_id(self, skill_id: int) -> Skill | None:
         return self.db.get(Skill, skill_id)
@@ -31,10 +35,18 @@ class SkillRepository:
         return result.scalars().one_or_none()
 
     def update(self, skill: Skill) -> Skill:
-        self.db.commit()
-        self.db.refresh(skill)
-        return skill
+        try:
+            self.db.commit()
+            self.db.refresh(skill)
+            return skill
+        except Exception:
+            self.db.rollback()
+            raise
 
     def delete(self, skill: Skill) -> None:
-        self.db.delete(skill)
-        self.db.commit()
+        try:
+            self.db.delete(skill)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise

@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends
+
 from app.dependencies.skill_dependencies import get_skill_service
+from app.dependencies.auth_dependencies import get_current_user
+
 from app.schemas.skill import SkillCreate, SkillResponse, SkillUpdate
+
 from app.services.skill_service import SkillService
+
 
 router = APIRouter(
     prefix="/skills",
@@ -9,52 +14,63 @@ router = APIRouter(
 )
 
 
-@router.post("/",
-            response_model=SkillResponse,
-            status_code=201)
+@router.post(
+    "/",
+    response_model=SkillResponse,
+    status_code=201
+)
 def create_skill(
     skill_create: SkillCreate,
     service: SkillService = Depends(get_skill_service),
-    ):
+    current_user: str = Depends(get_current_user),
+):
     return service.create(skill_create)
 
 
-@router.get("/",
-            response_model=list[SkillResponse])
+@router.get(
+    "/",
+    response_model=list[SkillResponse]
+)
 def get_all_skills(
     service: SkillService = Depends(get_skill_service),
-    ):
+):
     return service.get_all()
 
 
-@router.get("/{skill_id}",
-            response_model=SkillResponse)
+@router.get(
+    "/{skill_id}",
+    response_model=SkillResponse
+)
 def get_skill(
     skill_id: int,
     service: SkillService = Depends(get_skill_service),
-    ):
+):
     skill = service.get_by_id(skill_id)
     return skill
 
 
-@router.delete("/{skill_id}",
-            status_code=204)
+@router.delete(
+    "/{skill_id}",
+    status_code=204
+)
 def delete_skill(
     skill_id: int,
     service: SkillService = Depends(get_skill_service),
-    ):
+    current_user: str = Depends(get_current_user),
+):
     skill = service.get_by_id(skill_id)
     service.delete(skill)
 
 
-@router.put("/{skill_id}",
-            response_model=SkillResponse)
+@router.put(
+    "/{skill_id}",
+    response_model=SkillResponse
+)
 def update_skill(
     skill_id: int,
     skill_update: SkillUpdate,
     service: SkillService = Depends(get_skill_service),
-    ):
+    current_user: str = Depends(get_current_user),
+):
     skill = service.get_by_id(skill_id)
     return service.update(skill, skill_update)
-
-

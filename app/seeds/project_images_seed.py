@@ -418,4 +418,62 @@ PROJECT_IMAGES: list[ProjectImage] = [
         image_url="/static/images/projects/portfolio-backend/backend-project-technology-model.png",
         display_order=7,
     ),
+    # =====================================================
+    # Project 5 - Portfolio Frontend
+    # =====================================================
+
+    ProjectImage(
+        project_id=5,
+        title="Frontend Home Page",
+        description=(
+            "Portfolio frontend home page showcasing the primary navigation, "
+            "featured projects, frontend technology stack, and portfolio presentation."
+        ),
+        image_url="/static/images/projects/portfolio-frontend/frontend-home-page.png",
+        display_order=1,
+    ),
+
+    ProjectImage(
+        project_id=5,
+        title="Frontend Menu Bar",
+        description=(
+            "Responsive portfolio menu interface providing navigation between "
+            "the major sections of the application."
+        ),
+        image_url="/static/images/projects/portfolio-frontend/frontend-menu-bar.png",
+        display_order=2,
+    ),
+
+    ProjectImage(
+        project_id=5,
+        title="Frontend Navigation Bar",
+        description=(
+            "Portfolio navigation bar providing access to the primary application "
+            "pages and frontend features."
+        ),
+        image_url="/static/images/projects/portfolio-frontend/frontend-navbar.png",
+        display_order=3,
+    ),
+
+    ProjectImage(
+        project_id=5,
+        title="Project Detail Page",
+        description=(
+            "Frontend project detail interface displaying project information, "
+            "technologies, skills, and project imagery."
+        ),
+        image_url="/static/images/projects/portfolio-frontend/frontend-projectdetail-page.png",
+        display_order=4,
+    ),
+
+    ProjectImage(
+        project_id=5,
+        title="Projects Page",
+        description=(
+            "Portfolio projects interface displaying the collection of development "
+            "and infrastructure projects."
+        ),
+        image_url="/static/images/projects/portfolio-frontend/frontend-projects-page.png",
+        display_order=5,
+    ),
 ]

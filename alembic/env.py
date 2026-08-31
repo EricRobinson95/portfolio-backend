@@ -12,6 +12,7 @@ import app.models.project_technology
 import app.models.project_image
 import app.models.skill
 import app.models.project_skill
+import app.models.admin
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

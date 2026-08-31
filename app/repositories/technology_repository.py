@@ -10,10 +10,14 @@ class TechnologyRepository:
         self.db = db
 
     def create(self, technology: Technology) -> Technology:
-        self.db.add(technology)
-        self.db.commit()
-        self.db.refresh(technology)
-        return technology
+        try:
+            self.db.add(technology)
+            self.db.commit()
+            self.db.refresh(technology)
+            return technology
+        except Exception:
+            self.db.rollback()
+            raise
 
     def get_by_id(self, technology_id: int) -> Technology | None:
         return self.db.get(Technology, technology_id)
@@ -31,10 +35,18 @@ class TechnologyRepository:
         return result.scalars().one_or_none()
 
     def update(self, technology: Technology) -> Technology:
-        self.db.commit()
-        self.db.refresh(technology)
-        return technology
+        try:
+            self.db.commit()
+            self.db.refresh(technology)
+            return technology
+        except Exception:
+            self.db.rollback()
+            raise
 
     def delete(self, technology: Technology) -> None:
-        self.db.delete(technology)
-        self.db.commit()
+        try:
+            self.db.delete(technology)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
