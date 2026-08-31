@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.project_router import router as project_router
@@ -38,10 +38,14 @@ if settings.should_serve_local_static_files:
     )
 
 register_exception_handlers(app)
-app.include_router(project_router)
-app.include_router(technology_router)
-app.include_router(skill_router)
-app.include_router(project_image_router)
-app.include_router(auth_router)
+
+api_router = APIRouter(prefix="/api")
+api_router.include_router(project_router)
+api_router.include_router(technology_router)
+api_router.include_router(skill_router)
+api_router.include_router(project_image_router)
+api_router.include_router(auth_router)
+
+app.include_router(api_router)
 app.include_router(health_router)
 
