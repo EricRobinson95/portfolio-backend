@@ -37,3 +37,49 @@ jobs:
 
       - name: Build backend image
         run: docker build -t portfolio-backend:ci .
+      - name: Start backend container
+        run: |
+          docker run -d --name portfolio-backend-smoke \
+            -p 127.0.0.1:8001:8000 \
+            -e DATABASE_URL=sqlite+pysqlite:///:memory: \
+            -e SECRET_KEY=test-only-secret-key-at-least-32-bytes-long \
+            -e PROJECT_NAME=PortfolioSmokeTest \
+            -e API_VERSION=test \
+            -e ADMIN_USERNAME=test-admin \
+            -e ADMIN_PASSWORD=test-only-password \
+            -e ENVIRONMENT=test \
+            -e SERVE_LOCAL_STATIC_FILES=false \
+            portfolio-backend:ci
+
+      - name: Verify backend health
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          url = "http://127.0.0.1:8001/health"
+
+          for attempt in range(1, 16):
+              try:
+                  with urllib.request.urlopen(url, timeout=2) as response:
+                      status = response.status
+                      body = json.load(response)
+                  if status != 200 or body != {"status": "ok"}:
+                      raise ValueError(f"Unexpected response: {status}, {body}")
+                  print("Container smoke test passed.")
+                  break
+              except Exception as error:
+                  print(f"Attempt {attempt}/15 failed: {error}")
+                  if attempt == 15:
+                      raise
+                  time.sleep(2)
+          PY
+
+      - name: Show container logs
+        if: always()
+        run: docker logs portfolio-backend-smoke
+
+      - name: Remove test container
+        if: always()
+        run: docker rm -f portfolio-backend-smoke
