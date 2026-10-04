@@ -26,3 +26,14 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -v
+
+  docker-build:
+    name: Backend Docker build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build backend image
+        run: docker build -t portfolio-backend:ci .
