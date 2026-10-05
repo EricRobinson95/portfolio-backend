@@ -16,6 +16,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Check deployment script syntax
+        run: bash -n scripts/deploy-backend.sh
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -31,6 +34,8 @@ jobs:
     name: Backend Docker build
     needs: test
     runs-on: ubuntu-24.04
+    outputs:
+      image_uri: ${{ steps.publish.outputs.image_uri }}
     permissions:
       contents: read
       id-token: write
@@ -41,6 +46,7 @@ jobs:
 
       - name: Build backend image
         run: docker build -t portfolio-backend:ci .
+
       - name: Start backend container
         run: |
           docker run -d --name portfolio-backend-smoke \
@@ -83,9 +89,11 @@ jobs:
       - name: Show container logs
         if: always()
         run: docker logs portfolio-backend-smoke
+
       - name: Remove test container
         if: always()
         run: docker rm -f portfolio-backend-smoke
+
       - name: Configure AWS credentials
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v6.3.0
@@ -101,6 +109,7 @@ jobs:
 
       - name: Publish tested backend image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: publish
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
@@ -109,6 +118,159 @@ jobs:
           IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
 
           docker tag portfolio-backend:ci "$IMAGE_URI"
-          docker push "$IMAGE_URI"
+          docker push "$IMAGE_URI" | tee /tmp/backend-push.txt
 
-          printf '### Published backend image\n\n`%s`\n' "$IMAGE_URI" >> "$GITHUB_STEP_SUMMARY"
+          DIGEST="$(awk '$2 == "digest:" {print $3}' /tmp/backend-push.txt)"
+          if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Could not determine the published image digest."
+            exit 1
+          fi
+
+          DEPLOY_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}@${DIGEST}"
+          echo "image_uri=${DEPLOY_IMAGE}" >> "$GITHUB_OUTPUT"
+
+          printf '### Published backend image\n\n`%s`\n' \
+            "$DEPLOY_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy backend to EC2
+    needs: docker-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: portfolio-backend-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: "327425719636"
+
+      - name: Deploy through Systems Manager
+        env:
+          DEPLOY_IMAGE: ${{ needs.docker-build.outputs.image_uri }}
+          INSTANCE_ID: i-068ba6708472b588f
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import pathlib
+          import re
+          import shlex
+          import subprocess
+          import time
+
+          image = os.environ["DEPLOY_IMAGE"]
+          instance = os.environ["INSTANCE_ID"]
+          repository = (
+              "327425719636.dkr.ecr.us-east-2.amazonaws.com/"
+              "portfolio-backend"
+          )
+
+          if not re.fullmatch(
+              re.escape(repository) + r"@sha256:[a-f0-9]{64}", image
+          ):
+              raise SystemExit("Missing or invalid deployment image digest.")
+
+          script = pathlib.Path("scripts/deploy-backend.sh").read_bytes()
+          if b"\r" in script:
+              raise SystemExit("Deployment script must use LF line endings.")
+
+          encoded = base64.b64encode(script).decode("ascii")
+          command = "\n".join([
+              "set -eu",
+              "DEPLOY_SCRIPT=$(mktemp /tmp/portfolio-deploy.XXXXXX)",
+              "trap 'rm -f -- \"$DEPLOY_SCRIPT\"' EXIT",
+              f"printf '%s' {shlex.quote(encoded)} | base64 -d > \"$DEPLOY_SCRIPT\"",
+              f"bash \"$DEPLOY_SCRIPT\" {shlex.quote(image)}",
+          ])
+
+          request = {
+              "DocumentName": "AWS-RunShellScript",
+              "InstanceIds": [instance],
+              "Comment": "Deploy validated portfolio backend image",
+              "TimeoutSeconds": 120,
+              "Parameters": {
+                  "commands": [command],
+                  "executionTimeout": ["900"],
+              },
+          }
+          request_path = pathlib.Path("ssm-deployment.json")
+          request_path.write_text(json.dumps(request))
+
+          def aws(*arguments):
+              return subprocess.run(
+                  ["aws", "ssm", *arguments, "--output", "json",
+                   "--no-cli-pager"],
+                  capture_output=True,
+                  text=True,
+                  timeout=60,
+              )
+
+          sent = aws(
+              "send-command",
+              "--cli-input-json",
+              f"file://{request_path}",
+          )
+          if sent.returncode:
+              raise SystemExit(sent.stderr)
+
+          command_id = json.loads(sent.stdout)["Command"]["CommandId"]
+          print(f"SSM command ID: {command_id}", flush=True)
+
+          deadline = time.monotonic() + 1050
+          while time.monotonic() < deadline:
+              result = aws(
+                  "get-command-invocation",
+                  "--command-id", command_id,
+                  "--instance-id", instance,
+              )
+              if result.returncode:
+                  if "InvocationDoesNotExist" in result.stderr:
+                      time.sleep(5)
+                      continue
+                  raise SystemExit(result.stderr)
+
+              invocation = json.loads(result.stdout)
+              status = invocation["Status"]
+              if status in {"Pending", "InProgress", "Delayed"}:
+                  time.sleep(5)
+                  continue
+
+              print(invocation.get("StandardOutputContent", ""))
+              print(invocation.get("StandardErrorContent", ""))
+              print(f"Deployment command status: {status}")
+
+              if status != "Success" or invocation.get("ResponseCode") != 0:
+                  raise SystemExit(
+                      "Deployment failed. Review the SSM output and "
+                      "verify the backend's current state."
+                  )
+
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write(
+                      f"### Backend deployment\n\n"
+                      f"Image: `{image}`\n\n"
+                      f"Instance: `{instance}`\n\n"
+                      f"SSM command: `{command_id}`\n\n"
+                      "Container and local HTTP health checks passed.\n"
+                  )
+              break
+          else:
+              raise SystemExit(
+                  f"Stopped waiting for SSM command {command_id}. "
+                  "The remote command may still be running; inspect "
+                  "it before retrying."
+              )
+          PY
