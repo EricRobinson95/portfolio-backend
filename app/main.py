@@ -1,5 +1,6 @@
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.logging import configure_logging, RequestLoggingMiddleware
 
 from app.routers.project_router import router as project_router
 from app.routers.technology_router import router as technology_router
@@ -11,6 +12,7 @@ from app.exceptions.exception_handlers import register_exception_handlers
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 
+configure_logging()
 
 app = FastAPI(
     title="Portfolio Backend API",
@@ -49,3 +51,6 @@ api_router.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(health_router)
 
+
+
+app.add_middleware(RequestLoggingMiddleware)

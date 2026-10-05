@@ -137,4 +137,5 @@ def register_exception_handlers(app: FastAPI):
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error."},
+            headers={"X-Request-ID": request.state.request_id},
         )
