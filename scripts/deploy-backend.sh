@@ -129,6 +129,9 @@ docker pull "$NEW_IMAGE"
 
 candidate_owned=1
 docker run -d --name "$CANDIDATE" \
+  --log-driver awslogs \
+  --log-opt awslogs-region=us-east-2 \
+  --log-opt awslogs-group=/portfolio/production/backend \
   --env-file "$ENV_FILE" \
   -p 127.0.0.1:8001:8000 \
   "$NEW_IMAGE"
@@ -152,6 +155,9 @@ old_renamed=1
 
 docker run -d --name "$CURRENT" \
   --restart unless-stopped \
+  --log-driver awslogs \
+  --log-opt awslogs-region=us-east-2 \
+  --log-opt awslogs-group=/portfolio/production/backend \
   --env-file "$ENV_FILE" \
   -p 8000:8000 \
   "$NEW_IMAGE"
