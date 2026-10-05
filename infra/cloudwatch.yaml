@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Portfolio backend CloudWatch logging resources
+
+Parameters:
+  EC2RoleName:
+    Type: String
+    Default: portfolio-ec2-role
+    Description: Existing IAM role used by the portfolio EC2 instance
+
+Resources:
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /portfolio/production/backend
+      RetentionInDays: 7
+      Tags:
+        - Key: Project
+          Value: portfolio
+        - Key: Environment
+          Value: production
+
+  BackendLogWriterPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: PortfolioBackendCloudWatchLogs
+      Roles:
+        - !Ref EC2RoleName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: WriteBackendLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !GetAtt BackendLogGroup.Arn
+
+Outputs:
+  BackendLogGroupName:
+    Description: Log group used by the backend Docker container
+    Value: !Ref BackendLogGroup
