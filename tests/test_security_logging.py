@@ -53,7 +53,7 @@ def auth_client(monkeypatch):
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router, prefix="/api")
-    app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(RequestLoggingMiddleware, trusted_proxy_cidrs=("10.0.1.0/24",))
     app.dependency_overrides[get_auth_service] = lambda: AuthService(repository)
     with TestClient(app, raise_server_exceptions=False) as client:
         yield client, repository
@@ -120,6 +120,27 @@ def test_denied_access_is_logged(auth_client, captured_logs, headers):
     assert "private-invalid-token" not in captured_logs.getvalue()
 
 
+@pytest.mark.parametrize("path,method", [("/api/auth/login", "POST"), ("/api/auth/test", "GET")])
+@pytest.mark.parametrize("peer,expected,source", [
+    ("10.0.1.5", "203.0.113.9", "alb"),
+    ("198.51.100.8", "198.51.100.8", "peer"),
+])
+def test_security_events_include_resolved_ip_only(
+    auth_client, captured_logs, path, method, peer, expected, source,
+):
+    existing_client, _ = auth_client
+    with TestClient(existing_client.app, client=(peer, 50000)) as client:
+        response = client.request(method, path, headers={
+            "X-Forwarded-For": "192.0.2.123, 203.0.113.9",
+        }, **({"json": {"username": "x", "password": "y"}} if method == "POST" else {}))
+    event = events(captured_logs)[0]
+    assert event["client_ip"] == expected
+    assert event["client_ip_source"] == source
+    assert event["request_id"] == response.headers["X-Request-ID"]
+    assert "client_ip" not in events(captured_logs, "http_request")[0]
+    assert "192.0.2.123" not in captured_logs.getvalue()
+
+
 @pytest.mark.parametrize("result", ["success", "missing", "commit_failure"])
 def test_password_reset_outcomes(monkeypatch, captured_logs, result):
     db = Mock()
@@ -143,6 +164,7 @@ def test_password_reset_outcomes(monkeypatch, captured_logs, result):
         "success": "success", "missing": "rejected", "commit_failure": "error",
     }[result]
     assert recorded[0]["operation_id"] == recorded[1]["operation_id"]
+    assert all("client_ip" not in event for event in recorded)
     if result == "success":
         db.commit.assert_called_once()
     elif result == "missing":

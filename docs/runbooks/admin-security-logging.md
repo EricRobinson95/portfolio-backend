@@ -20,7 +20,55 @@ Unknown usernames and wrong passwords share the `invalid_credentials` reason.
 Malformed login input uses `invalid_request`; internal failures use
 `authentication_error`. Reasons are fixed codes rather than exception messages.
 These security events omit submitted usernames, passwords, password hashes,
-tokens, request bodies, headers, and visitor IP addresses.
+tokens, request bodies, and raw headers. HTTP security events include a validated
+`client_ip` when available, with `client_ip_source` identifying `peer` or `alb`.
+Ordinary HTTP request events omit IP addresses. Operator events have no client IP.
+
+## Trusted client IP configuration
+
+`SECURITY_TRUSTED_PROXY_CIDRS` is a comma-separated list of the actual ALB subnet
+CIDRs. Its default is empty: forwarded headers are ignored and only the socket
+peer address is recorded. A peer address behind a proxy may identify that proxy,
+so check `client_ip_source` before treating it as a visitor address.
+
+Before enabling this in production, verify:
+
+1. The ALB uses `X-Forwarded-For` **Append** mode. Preserve mode is not supported.
+2. The EC2 security group permits backend port 8000 only from the ALB security
+   group. Trusting a subnet alone does not prove the sender is the ALB.
+3. The configured CIDRs match the ALB subnets. Do not use `*`, the entire VPC,
+   `0.0.0.0/0`, or `::/0` as a shortcut.
+4. Uvicorn runs with `--no-proxy-headers`, as configured in the Dockerfile. For
+   local execution, also pass this flag. This preserves the original socket peer
+   for our resolver instead of having Uvicorn rewrite it first.
+
+For a trusted connection, the resolver reads only the last address appended by
+the ALB, ignoring visitor-supplied prefixes. IPv4, IPv6, and ALB client-port
+formats are supported. Missing, duplicate, malformed, or oversized forwarded
+headers cause the IP fields to be omitted. Never guess a visitor address from
+invalid proxy data. This supports one direct ALB hop; reassess before adding
+CloudFront or another proxy in front of the login endpoint.
+
+Set this non-secret configuration through the existing production environment
+management process, then recreate the containers. A local `.env` change does
+not update `/opt/portfolio/backend.env` or a running container.
+
+The ALB console was checked on 2026-10-05: `portfolio-app-alb` uses Append mode
+with client-port preservation off. Its subnets are `subnet-03b38fc52f1aa007a`
+(`10.0.1.0/24`) and `subnet-08354f99d440707ee` (`10.0.0.0/24`). Instance
+`i-068ba6708472b588f` has security group `sg-0f45adf88548356f8`; its backend TCP
+8000 rule permits only ALB security group `sg-057678632c25c0463`. The
+corresponding production setting is:
+
+```text
+SECURITY_TRUSTED_PROXY_CIDRS=10.0.1.0/24,10.0.0.0/24
+```
+
+Recheck these settings if the ALB, network mapping, or security groups change.
+
+IP addresses identify a network source, not a person. Limit log access and retain
+them only as long as needed; the current log group has seven-day retention.
+This change adds investigation context, not blocking or automated alerts.
 
 ## View in CloudWatch
 
