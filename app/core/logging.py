@@ -7,11 +7,14 @@ from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.security_logging import configure_security_logging, log_security_event
+
 
 logger = logging.getLogger("portfolio.requests")
 
 
 def configure_logging() -> None:
+    configure_security_logging()
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter("%(message)s"))
@@ -67,6 +70,27 @@ class RequestLoggingMiddleware:
         finally:
             route = scope.get("route")
             route_pattern = getattr(route, "path", "<unmatched>")
+
+            if (
+                scope["method"] == "POST"
+                and getattr(route, "endpoint", None) is not None
+                and getattr(route.endpoint, "security_action", None) == "admin_login"
+            ):
+                outcome, reason = {
+                    200: ("success", None),
+                    401: ("rejected", "invalid_credentials"),
+                    422: ("rejected", "invalid_request"),
+                }.get(status_code, ("error", "authentication_error"))
+                log_security_event(
+                    action="admin_login", outcome=outcome, source="http",
+                    request_id=request_id, status_code=status_code, reason=reason,
+                )
+            elif status_code in (401, 403):
+                log_security_event(
+                    action="access_denied", outcome="rejected", source="http",
+                    request_id=request_id, status_code=status_code,
+                    reason="unauthorized_or_forbidden",
+                )
 
             event = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
