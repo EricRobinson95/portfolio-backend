@@ -64,6 +64,48 @@ Resources:
       Protocol: email
       Endpoint: !Ref AlertEmail
 
+  AdminSecurityDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: portfolio-production-admin-security
+      DashboardBody: !Sub |
+        {
+          "start": "-PT6H",
+          "periodOverride": "inherit",
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Rejected admin logins per minute",
+                "view": "timeSeries",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["Portfolio/Backend", "RejectedAdminLogins"]
+                ],
+                "stat": "Sum",
+                "period": 60
+              }
+            },
+              {
+              "type": "alarm",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Admin login alarm status",
+                "alarms": [
+                  "${RejectedAdminLoginsAlarm.Arn}"
+                ]
+              }
+            }
+          ]
+        }
+
   BackendLogWriterPolicy:
     Type: AWS::IAM::Policy
     Properties:
