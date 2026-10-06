@@ -21,6 +21,17 @@ Resources:
         - Key: Environment
           Value: production
 
+  RejectedAdminLoginsFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref BackendLogGroup
+      FilterPattern: '{ $.event = "security_event" && $.action = "admin_login" && $.outcome = "rejected" }'
+      MetricTransformations:
+        - MetricNamespace: Portfolio/Backend
+          MetricName: RejectedAdminLogins
+          MetricValue: "1"
+          Unit: Count
+
   BackendLogWriterPolicy:
     Type: AWS::IAM::Policy
     Properties:
