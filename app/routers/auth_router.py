@@ -31,6 +31,10 @@ def login(
     )
 
 
+# Identifies this endpoint to logging without inspecting request credentials.
+login.security_action = "admin_login"
+
+
 @router.get("/test")
 def test_authentication(
     current_user: str = Depends(get_current_user),
