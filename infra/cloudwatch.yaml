@@ -6,6 +6,9 @@ Parameters:
     Type: String
     Default: portfolio-ec2-role
     Description: Existing IAM role used by the portfolio EC2 instance
+  AlertEmail:
+    Type: String
+    Description: Email address that receives admin login alerts.
 
 Resources:
   BackendLogGroup:
@@ -31,6 +34,35 @@ Resources:
           MetricName: RejectedAdminLogins
           MetricValue: "1"
           Unit: Count
+
+  RejectedAdminLoginsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: portfolio-production-rejected-admin-logins
+      AlarmDescription: Five or more rejected admin logins in a one-minute period.
+      Namespace: Portfolio/Backend
+      MetricName: RejectedAdminLogins
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AdminSecurityAlertsTopic
+
+  AdminSecurityAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: portfolio-production-admin-security-alerts
+
+  AdminSecurityAlertsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AdminSecurityAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
   BackendLogWriterPolicy:
     Type: AWS::IAM::Policy
