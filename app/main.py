@@ -53,4 +53,4 @@ app.include_router(health_router)
 
 
 
-app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RequestLoggingMiddleware, trusted_proxy_cidrs=settings.trusted_proxy_cidrs)

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.client_ip import ClientIPResolver
 from app.core.security_logging import configure_security_logging, log_security_event
 
 
@@ -25,8 +26,9 @@ def configure_logging() -> None:
 
 
 class RequestLoggingMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, trusted_proxy_cidrs: tuple[str, ...] = ()) -> None:
         self.app = app
+        self.client_ip_resolver = ClientIPResolver(trusted_proxy_cidrs)
 
     async def __call__(
         self,
@@ -70,6 +72,7 @@ class RequestLoggingMiddleware:
         finally:
             route = scope.get("route")
             route_pattern = getattr(route, "path", "<unmatched>")
+            client_ip, client_ip_source = self.client_ip_resolver.resolve(scope)
 
             if (
                 scope["method"] == "POST"
@@ -84,12 +87,14 @@ class RequestLoggingMiddleware:
                 log_security_event(
                     action="admin_login", outcome=outcome, source="http",
                     request_id=request_id, status_code=status_code, reason=reason,
+                    client_ip=client_ip, client_ip_source=client_ip_source,
                 )
             elif status_code in (401, 403):
                 log_security_event(
                     action="access_denied", outcome="rejected", source="http",
                     request_id=request_id, status_code=status_code,
                     reason="unauthorized_or_forbidden",
+                    client_ip=client_ip, client_ip_source=client_ip_source,
                 )
 
             event = {

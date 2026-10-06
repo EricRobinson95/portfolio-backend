@@ -20,12 +20,19 @@ class Settings(BaseSettings):
     s3_bucket: str | None = None
     aws_region: str = "us-east-2"
     serve_local_static_files: bool | None = None
+    # Comma-separated ALB subnet CIDRs. Empty means forwarded headers are ignored.
+    security_trusted_proxy_cidrs: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def trusted_proxy_cidrs(self) -> tuple[str, ...]:
+        return tuple(value.strip() for value in self.security_trusted_proxy_cidrs.split(",")
+                     if value.strip())
 
     @property
     def should_serve_local_static_files(self) -> bool:
