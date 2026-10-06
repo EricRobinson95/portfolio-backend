@@ -21,7 +21,8 @@ Malformed login input uses `invalid_request`; internal failures use
 `authentication_error`. Reasons are fixed codes rather than exception messages.
 These security events omit submitted usernames, passwords, password hashes,
 tokens, request bodies, and raw headers. HTTP security events include a validated
-`client_ip` when available, with `client_ip_source` identifying `peer` or `alb`.
+`client_ip` when available, with `client_ip_source` identifying `peer`, `alb`, or
+`cloudflare`.
 Ordinary HTTP request events omit IP addresses. Operator events have no client IP.
 
 ## Trusted client IP configuration
@@ -46,8 +47,36 @@ For a trusted connection, the resolver reads only the last address appended by
 the ALB, ignoring visitor-supplied prefixes. IPv4, IPv6, and ALB client-port
 formats are supported. Missing, duplicate, malformed, or oversized forwarded
 headers cause the IP fields to be omitted. Never guess a visitor address from
-invalid proxy data. This supports one direct ALB hop; reassess before adding
-CloudFront or another proxy in front of the login endpoint.
+invalid proxy data.
+
+### Cloudflare before the ALB
+
+For the production path `visitor -> Cloudflare -> ALB -> EC2`, the address
+appended by the ALB identifies Cloudflare. The resolver checks this address
+against Cloudflare's published IPv4 and IPv6 proxy ranges before reading exactly
+one valid `CF-Connecting-IP` header. These events use
+`client_ip_source: cloudflare`. A client reaching the ALB directly cannot spoof
+this field by supplying the header or a Cloudflare address earlier in
+`X-Forwarded-For`; only the address actually appended by the ALB is checked.
+
+If the verified Cloudflare hop supplies missing, duplicate, malformed, or
+oversized visitor data, the IP fields are omitted. The resolver does not fall
+back to recording the Cloudflare edge as a visitor. Direct requests through the
+ALB still use `client_ip_source: alb` and ignore `CF-Connecting-IP`.
+
+The reviewed range list is in `app/core/cloudflare_ips.py`, checked on
+2026-10-05 against https://www.cloudflare.com/ips-v4 and
+https://www.cloudflare.com/ips-v6. Review and update it when those published
+ranges change; requests never download a trust list at runtime. Existing ALB
+CIDR configuration remains required. No extra production environment setting is
+needed for this extension.
+
+This assumes standard Cloudflare proxying. Cloudflare Workers can alter visitor
+header semantics, and Pseudo IPv4 "Overwrite Headers" can substitute a synthetic
+address. Verify those features are not modifying login traffic before relying
+on this field as the visitor IP. Reassess the trust chain when adding another
+proxy. These checks establish a network path, not a particular Cloudflare zone
+or the identity of a person.
 
 Set this non-secret configuration through the existing production environment
 management process, then recreate the containers. A local `.env` change does
