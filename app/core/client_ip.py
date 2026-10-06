@@ -1,8 +1,9 @@
 from ipaddress import ip_address, ip_network
 
+from app.core.cloudflare_ips import CLOUDFLARE_NETWORKS
 
 class ClientIPResolver:
-    """Resolve the network source for direct requests or one trusted ALB hop."""
+    """Resolve direct, ALB, or Cloudflare through ALB request sources."""
 
     def __init__(self, trusted_proxy_cidrs: tuple[str, ...] = ()) -> None:
         # Invalid configuration fails during initialization instead of broadening trust.
@@ -49,6 +50,16 @@ class ClientIPResolver:
                     parsed = ip_address(host)
                     if parsed.version != 4:
                         return None, None
+            if any(parsed in network for network in CLOUDFLARE_NETWORKS):
+                # Only an ALB-verified Cloudflare source may supply this header.
+                connecting = [value for name, value in scope.get("headers", [])
+                              if name.lower() == b"cf-connecting-ip"]
+                if len(connecting) != 1 or len(connecting[0]) > 45:
+                    return None, None
+                visitor = connecting[0].decode("ascii").strip()
+                if "%" in visitor:
+                    return None, None
+                return str(ip_address(visitor)), "cloudflare"
             return str(parsed), "alb"
         except ValueError:
             return None, None

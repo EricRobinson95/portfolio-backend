@@ -64,3 +64,53 @@ def test_ipv6_proxy_network():
 def test_invalid_network_configuration_fails(cidr):
     with pytest.raises(ValueError):
         ClientIPResolver((cidr,))
+
+
+@pytest.mark.parametrize("edge", [
+    b"172.70.80.213", b"172.69.214.198:45678", b"2606:4700::1",
+    b"[2606:4700::1]:45678",
+])
+@pytest.mark.parametrize("visitor", [b"198.51.100.25", b"2001:db8::25"])
+def test_cloudflare_visitor_requires_both_verified_hops(edge, visitor):
+    request = scope(forwarded=b"fake-visitor, " + edge)
+    request["headers"].append((b"cf-connecting-ip", visitor))
+    assert ClientIPResolver(("10.0.1.0/24",)).resolve(request) == (
+        visitor.decode(), "cloudflare",
+    )
+
+
+@pytest.mark.parametrize("peer", ["198.51.100.8", "172.70.80.213"])
+def test_direct_peer_cannot_forge_entire_cloudflare_chain(peer):
+    request = scope(peer=peer, forwarded=b"172.70.80.213")
+    request["headers"].append((b"cf-connecting-ip", b"192.0.2.123"))
+    assert ClientIPResolver(("10.0.1.0/24",)).resolve(request) == (peer, "peer")
+
+
+def test_direct_alb_client_cannot_forge_cloudflare_header_or_prefix():
+    request = scope(forwarded=b"172.70.80.213, 198.51.100.8")
+    request["headers"].append((b"cf-connecting-ip", b"192.0.2.123"))
+    assert ClientIPResolver(("10.0.1.0/24",)).resolve(request) == ("198.51.100.8", "alb")
+
+
+@pytest.mark.parametrize("visitor", [
+    b"", b"garbage", b"192.0.2.1, 192.0.2.2", b"192.0.2.1:443",
+    b"[2001:db8::1]:443", b"fe80::1%eth0", b"\xff", b"x" * 46,
+])
+def test_invalid_cloudflare_visitor_is_omitted(visitor):
+    request = scope(forwarded=b"172.70.80.213")
+    request["headers"].append((b"cf-connecting-ip", visitor))
+    assert ClientIPResolver(("10.0.1.0/24",)).resolve(request) == (None, None)
+
+
+def test_cloudflare_missing_or_duplicate_visitor_header_is_omitted():
+    request = scope(forwarded=b"172.70.80.213")
+    resolver = ClientIPResolver(("10.0.1.0/24",))
+    assert resolver.resolve(request) == (None, None)
+    request["headers"].extend([(b"cf-connecting-ip", b"192.0.2.123")] * 2)
+    assert resolver.resolve(request) == (None, None)
+
+
+def test_cloudflare_source_does_not_enable_trust_by_default():
+    request = scope(forwarded=b"172.70.80.213")
+    request["headers"].append((b"cf-connecting-ip", b"192.0.2.123"))
+    assert ClientIPResolver().resolve(request) == ("10.0.1.5", "peer")

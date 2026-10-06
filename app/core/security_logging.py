@@ -27,7 +27,7 @@ def log_security_event(
     reason: str | None = None,
     status_code: int | None = None,
     client_ip: str | None = None,
-    client_ip_source: Literal["peer", "alb"] | None = None,
+    client_ip_source: Literal["peer", "alb", "cloudflare"] | None = None,
 ) -> None:
     # Callers supply fixed reason codes, never credentials or exception text.
     level = (

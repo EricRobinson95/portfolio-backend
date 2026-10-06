@@ -141,6 +141,27 @@ def test_security_events_include_resolved_ip_only(
     assert "192.0.2.123" not in captured_logs.getvalue()
 
 
+@pytest.mark.parametrize("password,status", [
+    ("private-correct-password", 200), ("private-wrong-password", 401),
+])
+def test_cloudflare_visitor_is_recorded_for_login(auth_client, captured_logs, password, status):
+    existing_client, _ = auth_client
+    with TestClient(existing_client.app, client=("10.0.1.5", 50000)) as client:
+        response = client.post("/api/auth/login", json={
+            "username": "private-admin", "password": password,
+        }, headers={
+            "X-Forwarded-For": "192.0.2.123, 172.70.80.213",
+            "CF-Connecting-IP": "198.51.100.25",
+        })
+    event = events(captured_logs)[0]
+    assert response.status_code == status
+    assert event["client_ip"] == "198.51.100.25"
+    assert event["client_ip_source"] == "cloudflare"
+    assert event["request_id"] == response.headers["X-Request-ID"]
+    for excluded in ("192.0.2.123", "172.70.80.213", password):
+        assert excluded not in captured_logs.getvalue()
+
+
 @pytest.mark.parametrize("result", ["success", "missing", "commit_failure"])
 def test_password_reset_outcomes(monkeypatch, captured_logs, result):
     db = Mock()
