@@ -18,7 +18,13 @@ configure_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    provider = configure_tracing(settings.tracing_enabled)
+    provider = configure_tracing(
+        settings.tracing_enabled,
+        exporter=settings.tracing_exporter,
+        endpoint=settings.tracing_otlp_endpoint,
+        sample_ratio=settings.tracing_sample_ratio,
+        environment=settings.environment,
+    )
 
     try:
         yield

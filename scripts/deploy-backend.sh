@@ -37,6 +37,30 @@ if [[ "$(stat -c '%a:%U:%G' "$ENV_FILE")" != "600:root:root" ]]; then
   exit 1
 fi
 
+# Production is enabled by default once the collector is installed. An operator
+# can disable export explicitly without changing or printing other env values.
+TRACING_ENABLED="$(python3 - "$ENV_FILE" <<'PY'
+import pathlib
+import sys
+
+value = "true"
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    key, separator, candidate = line.partition("=")
+    if separator and key.strip() == "TRACING_ENABLED":
+        value = candidate.strip().strip("\"'").lower()
+if value not in {"true", "false"}:
+    raise SystemExit("TRACING_ENABLED must be true or false when configured.")
+print(value)
+PY
+)"
+if [[ "$TRACING_ENABLED" == "true" ]]; then
+  [[ "$(docker inspect --format '{{.State.Running}}' portfolio-otel 2>/dev/null)" == "true" ]] &&
+    curl --fail --silent --max-time 3 http://127.0.0.1:13133/ >/dev/null || {
+      echo "Trace collector is unavailable; serving backend remains unchanged."
+      exit 1
+    }
+fi
+
 exists() {
   docker container inspect "$1" >/dev/null 2>&1
 }
@@ -129,6 +153,10 @@ docker pull "$NEW_IMAGE"
 
 candidate_owned=1
 docker run -d --name "$CANDIDATE" \
+  --add-host portfolio-otel:host-gateway \
+  -e "TRACING_ENABLED=${TRACING_ENABLED}" \
+  -e TRACING_EXPORTER=otlp \
+  -e TRACING_OTLP_ENDPOINT=http://portfolio-otel:4318/v1/traces \
   --log-driver awslogs \
   --log-opt awslogs-region=us-east-2 \
   --log-opt awslogs-group=/portfolio/production/backend \
@@ -149,11 +177,15 @@ if exists "$ROLLBACK"; then
 fi
 
 cutover_started=1
-docker stop "$CURRENT"
+docker stop --time 30 "$CURRENT"
 docker rename "$CURRENT" "$ROLLBACK"
 old_renamed=1
 
 docker run -d --name "$CURRENT" \
+  --add-host portfolio-otel:host-gateway \
+  -e "TRACING_ENABLED=${TRACING_ENABLED}" \
+  -e TRACING_EXPORTER=otlp \
+  -e TRACING_OTLP_ENDPOINT=http://portfolio-otel:4318/v1/traces \
   --restart unless-stopped \
   --log-driver awslogs \
   --log-opt awslogs-region=us-east-2 \

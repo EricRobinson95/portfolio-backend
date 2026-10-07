@@ -122,6 +122,23 @@ Resources:
               - logs:PutLogEvents
             Resource: !GetAtt BackendLogGroup.Arn
 
+  BackendTraceWriterPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: PortfolioBackendXRayTraces
+      Roles:
+        - !Ref EC2RoleName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: WriteBackendTraces
+            Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            # These write actions do not support resource-level permissions.
+            Resource: "*"
+
 Outputs:
   BackendLogGroupName:
     Description: Log group used by the backend Docker container
