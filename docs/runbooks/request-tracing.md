@@ -1,4 +1,4 @@
-# Local request tracing
+# Request tracing
 
 ## What a trace measures
 
@@ -34,6 +34,9 @@ some overhead to enclosing spans.
 - `request_id`: identifies the request and appears in `X-Request-ID` responses.
 - `trace_id`: identifies the trace containing the HTTP and authentication spans.
 - `span_id`: identifies the span current when a log is written.
+- `xray_trace_id`: the same trace ID formatted for searching AWS X-Ray.
+- `trace_sampled`: whether the SDK selected this trace for recording/export.
+  A false value means a trace ID can exist without a stored X-Ray trace.
 
 Request and middleware security logs have the HTTP span's IDs. The HTTP span
 also includes `app.request_id`, connecting a browser response ID to the trace.
@@ -64,8 +67,23 @@ Tests use an in-memory exporter, fake repositories, and FastAPI's TestClient.
 They do not call the production database or AWS. Test configuration disables
 console tracing; tracing tests supply their own provider through monkeypatch.
 
-The current production setup must keep tracing disabled. This exporter prints
-to stdout and does not send traces to an AWS tracing service. Enabling it inside
-the existing production Docker container would add span JSON to CloudWatch logs
-through the existing Docker log driver, increasing log volume and potentially
-cost. A production exporter, sampling, and cost review are separate work.
+## Production export
+
+Production deployment selects `TRACING_EXPORTER=otlp` and enables tracing.
+The SDK uses a bounded background batch processor and the AWS X-Ray ID generator.
+It sends OTLP/HTTP to `http://portfolio-otel:4318/v1/traces`. The collector running
+on the same EC2 instance exports these spans to X-Ray in `us-east-2` using the
+instance role. Traces appear in the CloudWatch trace view; request and security
+JSON logs continue going to the existing log group.
+
+The application samples all POST `/api/auth/login` requests, excludes `/health`,
+and samples other requests at `TRACING_SAMPLE_RATIO=0.1`. This is an approximate
+10% across many traces, not one trace in each group of ten. Child spans inherit
+their parent's decision. An ordinary request's later 500 response does not
+override its initial sampling decision. All login requests includes bots and
+malformed attempts; logging and metrics remain independent of trace sampling.
+
+Local tracing remains opt-in and can use the console exporter. See
+[production rollout and troubleshooting](production-request-tracing.md) before
+merging the production changes. An explicit `TRACING_ENABLED=false` in the EC2
+environment file disables tracing on the next deployment.

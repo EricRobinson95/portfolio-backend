@@ -64,6 +64,14 @@ class RequestLoggingMiddleware:
             kind=SpanKind.SERVER,
             instrumentation_scope="portfolio.http",
             context=Context(),
+            # Only classify fixed endpoints here; never attach actual URL paths.
+            attributes={
+                "app.health_check": scope.get("path") == "/health",
+                "app.operation": (
+                    "admin_login" if scope["method"] == "POST"
+                    and scope.get("path") == "/api/auth/login" else "http_request"
+                ),
+            },
         ) as span:
             await self._handle_request(scope, receive, send, request_id, span)
 

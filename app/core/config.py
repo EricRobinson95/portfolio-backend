@@ -1,3 +1,6 @@
+from typing import Literal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +11,9 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "development"
     tracing_enabled: bool = False
+    tracing_exporter: Literal["console", "otlp"] = "console"
+    tracing_otlp_endpoint: str = "http://portfolio-otel:4318/v1/traces"
+    tracing_sample_ratio: float = Field(default=0.1, ge=0, le=1)
 
     project_name: str
     api_version: str

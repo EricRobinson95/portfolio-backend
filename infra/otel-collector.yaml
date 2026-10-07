@@ -1,0 +1,38 @@
+# Receiver binds only to Docker's bridge gateway, not the EC2 VPC interface.
+# The installer derives OTEL_BIND_IP from the actual Docker bridge.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: ${env:OTEL_BIND_IP}:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+    spike_limit_mib: 32
+  batch:
+    timeout: 1s
+    send_batch_size: 128
+    send_batch_max_size: 128
+
+exporters:
+  awsxray:
+    region: us-east-2
+    index_all_attributes: false
+    indexed_attributes:
+      - app.request_id
+      - app.operation
+      - app.login.outcome
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [awsxray]

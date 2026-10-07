@@ -17,7 +17,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Check deployment script syntax
-        run: bash -n scripts/deploy-backend.sh
+        run: |
+          bash -n scripts/deploy-backend.sh
+          bash -n scripts/install-trace-collector.sh
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -46,6 +48,40 @@ jobs:
 
       - name: Build backend image
         run: docker build -t portfolio-backend:ci .
+
+      - name: Check production collector startup
+        run: |
+          docker run -d --name portfolio-otel-smoke \
+            --network host \
+            --user 0:0 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --memory 256m --memory-swap 256m --cpus 0.25 \
+            -e OTEL_BIND_IP=127.0.0.1 \
+            -e AWS_REGION=us-east-2 \
+            -e AWS_EC2_METADATA_DISABLED=true \
+            -v "$PWD/infra/otel-collector.yaml:/etc/otel-collector.yaml:ro" \
+            public.ecr.aws/aws-observability/aws-otel-collector:v0.50.0 \
+            --config=/etc/otel-collector.yaml
+          python - <<'PY'
+          import time
+          import urllib.request
+
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:13133/", timeout=2):
+                      print("Production collector configuration started successfully.")
+                      break
+              except OSError:
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          PY
+
+      - name: Show and remove collector test container
+        if: always()
+        run: |
+          docker logs portfolio-otel-smoke || true
+          docker rm -f portfolio-otel-smoke || true
 
       - name: Start backend container
         run: |
@@ -187,13 +223,28 @@ jobs:
           if b"\r" in script:
               raise SystemExit("Deployment script must use LF line endings.")
 
-          encoded = base64.b64encode(script).decode("ascii")
-          command = "\n".join([
+          files = {
+              "deploy-backend.sh": script,
+              "install-trace-collector.sh": pathlib.Path("scripts/install-trace-collector.sh").read_bytes(),
+              "otel-collector.yaml": pathlib.Path("infra/otel-collector.yaml").read_bytes(),
+          }
+          for name, content in files.items():
+              if b"\r" in content:
+                  raise SystemExit(f"{name} must use LF line endings.")
+          commands = [
               "set -eu",
-              "DEPLOY_SCRIPT=$(mktemp /tmp/portfolio-deploy.XXXXXX)",
-              "trap 'rm -f -- \"$DEPLOY_SCRIPT\"' EXIT",
-              f"printf '%s' {shlex.quote(encoded)} | base64 -d > \"$DEPLOY_SCRIPT\"",
-              f"bash \"$DEPLOY_SCRIPT\" {shlex.quote(image)}",
+              "DEPLOY_DIR=$(mktemp -d /tmp/portfolio-deploy.XXXXXX)",
+              "trap 'rm -rf -- \"$DEPLOY_DIR\"' EXIT",
+          ]
+          for name, content in files.items():
+              encoded = base64.b64encode(content).decode("ascii")
+              commands.append(
+                  f"printf '%s' {shlex.quote(encoded)} | base64 -d > \"$DEPLOY_DIR/{name}\""
+              )
+          command = "\n".join([
+              *commands,
+              'bash "$DEPLOY_DIR/install-trace-collector.sh" "$DEPLOY_DIR/otel-collector.yaml"',
+              f"bash \"$DEPLOY_DIR/deploy-backend.sh\" {shlex.quote(image)}",
           ])
 
           request = {
