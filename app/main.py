@@ -1,5 +1,7 @@
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from app.core.tracing import configure_tracing
 from app.core.logging import configure_logging, RequestLoggingMiddleware
 
 from app.routers.project_router import router as project_router
@@ -14,9 +16,20 @@ from app.core.config import settings
 
 configure_logging()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    provider = configure_tracing(settings.tracing_enabled)
+
+    try:
+        yield
+    finally:
+        if provider is not None:
+            provider.shutdown()
+
 app = FastAPI(
     title="Portfolio Backend API",
     description="Backend API for my developer portfolio.",
+    lifespan=lifespan,
     version="1.0.0",
 )
 
