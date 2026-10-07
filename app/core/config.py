@@ -7,6 +7,7 @@ class Settings(BaseSettings):
 
     debug: bool = False
     environment: str = "development"
+    tracing_enabled: bool = False
 
     project_name: str
     api_version: str

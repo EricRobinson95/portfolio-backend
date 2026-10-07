@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Literal
 
+from app.core.tracing import trace_log_fields
 
 security_logger = logging.getLogger("portfolio.security")
 
@@ -54,4 +55,5 @@ def log_security_event(
     }.items():
         if value is not None:
             event[key] = value
+    event.update(trace_log_fields())
     security_logger.log(level, json.dumps(event))

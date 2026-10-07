@@ -97,7 +97,9 @@ Recheck these settings if the ALB, network mapping, or security groups change.
 
 IP addresses identify a network source, not a person. Limit log access and retain
 them only as long as needed; the current log group has seven-day retention.
-This change adds investigation context, not blocking or automated alerts.
+Client IP logging adds investigation context. The separate monitoring resources
+send rejected-login alerts; they do not block requests. See the
+[admin login monitoring runbook](admin-login-monitoring.md).
 
 ## View in CloudWatch
 
@@ -125,7 +127,8 @@ CloudWatch for reset history. Do not run a real reset just to test logging.
 
 Logout currently removes the token from browser session storage; it sends no
 backend request, so these logs cannot record it. Logging adds evidence for
-investigation; it does not add rate limiting, token revocation, or alerts.
+investigation; it does not add rate limiting or token revocation. Alerts are
+configured separately through the CloudFormation metric, alarm, and SNS topic.
 The existing CloudWatch log group retains events for seven days.
 
 ## Verification before deployment
@@ -136,3 +139,9 @@ reset database; they do not change a real password or connect to production.
 After deployment, verify a rejected login produces one security event and one
 HTTP request event with matching request IDs. Verify a normal successful admin
 login the same way, without copying credentials or tokens into log searches.
+
+## Related guides
+
+- [HTTP request logging](http-request-logging.md)
+- [Admin login metrics and alerts](admin-login-monitoring.md)
+- [Request tracing](request-tracing.md)

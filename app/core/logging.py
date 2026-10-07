@@ -5,13 +5,28 @@ from datetime import datetime, timezone
 from time import perf_counter
 from uuid import uuid4
 
+from opentelemetry.context import Context
+from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.client_ip import ClientIPResolver
 from app.core.security_logging import configure_security_logging, log_security_event
+from app.core.tracing import operation_span, trace_log_fields
 
 
 logger = logging.getLogger("portfolio.requests")
+
+
+def _route_pattern(scope: Scope) -> str:
+    # FastAPI 0.141 keeps the original APIRoute in scope["route"]. Its
+    # effective context includes prefixes from every included router.
+    effective_route = scope.get("fastapi", {}).get("effective_route_context")
+    route = effective_route or scope.get("route")
+    return (
+        getattr(route, "path_format", None)
+        or getattr(route, "path", None)
+        or "<unmatched>"
+    )
 
 
 def configure_logging() -> None:
@@ -43,6 +58,23 @@ class RequestLoggingMiddleware:
         request_id = str(uuid4())
         scope.setdefault("state", {})["request_id"] = request_id
 
+        # Start a backend trace without trusting visitor-supplied trace headers.
+        with operation_span(
+            "HTTP",
+            kind=SpanKind.SERVER,
+            instrumentation_scope="portfolio.http",
+            context=Context(),
+        ) as span:
+            await self._handle_request(scope, receive, send, request_id, span)
+
+    async def _handle_request(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        request_id: str,
+        span: Span,
+    ) -> None:
         started = perf_counter()
         status_code = 500
         error_type = None
@@ -71,8 +103,26 @@ class RequestLoggingMiddleware:
             raise
         finally:
             route = scope.get("route")
-            route_pattern = getattr(route, "path", "<unmatched>")
+            route_pattern = _route_pattern(scope)
             client_ip, client_ip_source = self.client_ip_resolver.resolve(scope)
+
+            method = scope["method"]
+            if method not in {
+                "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT",
+                "OPTIONS", "TRACE", "PATCH",
+            }:
+                method = "_OTHER"
+            span.update_name(
+                f"{method} {route_pattern}" if route else method
+            )
+            span.set_attribute("http.request.method", method)
+            span.set_attribute("http.response.status_code", status_code)
+            span.set_attribute("app.request_id", request_id)
+            if route:
+                span.set_attribute("http.route", route_pattern)
+            if status_code >= 500 or error_type:
+                span.set_status(Status(StatusCode.ERROR))
+                span.set_attribute("error.type", error_type or str(status_code))
 
             if (
                 scope["method"] == "POST"
@@ -113,6 +163,8 @@ class RequestLoggingMiddleware:
 
             if error_type:
                 event["error_type"] = error_type
+
+            event.update(trace_log_fields())
 
             logger.log(
                 logging.ERROR if status_code >= 500 else logging.INFO,
