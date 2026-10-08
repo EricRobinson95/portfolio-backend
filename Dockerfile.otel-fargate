@@ -1,0 +1,8 @@
+FROM public.ecr.aws/aws-observability/aws-otel-collector:v0.50.0
+
+ENV OTEL_BIND_IP=127.0.0.1
+
+COPY infra/otel-collector.yaml /etc/otel/config.yaml
+
+ENTRYPOINT ["/awscollector"]
+CMD ["--config=/etc/otel/config.yaml"]

@@ -1,0 +1,630 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Portfolio ECS Fargate deployment
+Parameters:
+  BackendImageUri:
+    Type: String
+    Description: Backend image to run on Fargate
+    Default: 327425719636.dkr.ecr.us-east-2.amazonaws.com/portfolio-backend@sha256:d4c29ddb98ddc109daac1cbd075ce37000c76068f58d67e78839a821a6a0a1b7
+  CollectorImageUri:
+    Type: String
+    Description: Collector image to run alongside the backend
+    Default: 327425719636.dkr.ecr.us-east-2.amazonaws.com/portfolio-otel:fargate-v1
+  FrontendImageUri:
+    Type: String
+    Description: Frontend image to run on Fargate
+    Default: 327425719636.dkr.ecr.us-east-2.amazonaws.com/portfolio-frontend@sha256:414bc6e59f0f71b9975683c9a89d7c210a9b66859d51aa3a8626e4509bcb4748
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-0fdfec6f69c3f531b
+    Description: Existing portfolio VPC
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: subnet-03b38fc52f1aa007a,subnet-08354f99d440707ee
+    Description: Existing public subnets with an Internet Gateway route
+  AlbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: sg-057678632c25c0463
+    Description: Existing ALB security group
+  DatabaseSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: sg-0249737f01564e852
+    Description: Existing private PostgreSQL security group
+  HttpsListenerArn:
+    Type: String
+    Default: arn:aws:elasticloadbalancing:us-east-2:327425719636:listener/app/portfolio-app-alb/4073372cf4a16442/24ffb8436bb9a7b4
+    Description: Existing HTTPS listener; keep this ARN after importing its rules
+  Ec2BackendTargetGroupArn:
+    Type: String
+    Default: arn:aws:elasticloadbalancing:us-east-2:327425719636:targetgroup/portfolio-backend-tg/16ff7a5745011e42
+    Description: Existing EC2 backend target group
+  Ec2FrontendTargetGroupArn:
+    Type: String
+    Default: arn:aws:elasticloadbalancing:us-east-2:327425719636:targetgroup/portfolio-frontend-tg/ea4fb00b1e703348
+    Description: Existing EC2 frontend target group
+  ActiveDeployment:
+    Type: String
+    Default: fargate
+    Description: Select which deployment receives website traffic
+    AllowedValues:
+    - ec2
+    - fargate
+  FargateDesiredCount:
+    Type: Number
+    Default: 1
+    Description: 'Tasks per service: zero stops practice compute; one starts frontend and backend'
+    AllowedValues:
+    - 0
+    - 1
+Resources:
+  PortfolioCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: portfolio-fargate
+      CapacityProviders:
+      - FARGATE
+      DefaultCapacityProviderStrategy:
+      - CapacityProvider: FARGATE
+        Weight: 1
+      ClusterSettings:
+      - Name: containerInsights
+        Value: disabled
+      Tags:
+      - Key: Project
+        Value: portfolio
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+      - PolicyName: ReadBackendParameters
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:GetParameters
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/admin-password
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/admin-username
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/cloudfront-domain
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/database-url
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/s3-bucket
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/secret-key
+  BackendTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+          Condition:
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+      Policies:
+      - PolicyName: ExportBackendTraces
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+  CollectorRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: portfolio-otel
+      ImageTagMutability: IMMUTABLE
+      EncryptionConfiguration:
+        EncryptionType: AES256
+  FargateLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /portfolio/practice/fargate
+      RetentionInDays: 7
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: portfolio-practice-backend
+      RequiresCompatibilities:
+      - FARGATE
+      NetworkMode: awsvpc
+      Cpu: '512'
+      Memory: '1024'
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn:
+        Fn::GetAtt:
+        - TaskExecutionRole
+        - Arn
+      TaskRoleArn:
+        Fn::GetAtt:
+        - BackendTaskRole
+        - Arn
+      ContainerDefinitions:
+      - Name: collector
+        Image:
+          Ref: CollectorImageUri
+        Essential: true
+        Memory: 256
+        Environment:
+        - Name: AWS_REGION
+          Value:
+            Ref: AWS::Region
+        - Name: AWS_EC2_METADATA_DISABLED
+          Value: 'true'
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group:
+              Ref: FargateLogGroup
+            awslogs-region:
+              Ref: AWS::Region
+            awslogs-stream-prefix: collector
+      - Name: backend
+        Image:
+          Ref: BackendImageUri
+        Essential: true
+        Memory: 768
+        DependsOn:
+        - ContainerName: collector
+          Condition: START
+        PortMappings:
+        - ContainerPort: 8000
+          Protocol: tcp
+        Environment:
+        - Name: ENVIRONMENT
+          Value: production
+        - Name: PROJECT_NAME
+          Value: Portfolio Backend API
+        - Name: API_VERSION
+          Value: 1.0.0
+        - Name: AWS_REGION
+          Value:
+            Ref: AWS::Region
+        - Name: SERVE_LOCAL_STATIC_FILES
+          Value: 'false'
+        - Name: SECURITY_TRUSTED_PROXY_CIDRS
+          Value: 10.0.1.0/24,10.0.0.0/24
+        - Name: TRACING_ENABLED
+          Value: 'true'
+        - Name: TRACING_EXPORTER
+          Value: otlp
+        - Name: TRACING_OTLP_ENDPOINT
+          Value: http://127.0.0.1:4318/v1/traces
+        - Name: TRACING_SAMPLE_RATIO
+          Value: '0.1'
+        Secrets:
+        - Name: DATABASE_URL
+          ValueFrom: /portfolio/production/backend/database-url
+        - Name: SECRET_KEY
+          ValueFrom: /portfolio/production/backend/secret-key
+        - Name: ADMIN_USERNAME
+          ValueFrom: /portfolio/production/backend/admin-username
+        - Name: ADMIN_PASSWORD
+          ValueFrom: /portfolio/production/backend/admin-password
+        - Name: CLOUDFRONT_DOMAIN
+          ValueFrom: /portfolio/production/backend/cloudfront-domain
+        - Name: S3_BUCKET
+          ValueFrom: /portfolio/production/backend/s3-bucket
+        HealthCheck:
+          Command:
+          - CMD
+          - python
+          - -c
+          - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)
+          Interval: 30
+          Timeout: 5
+          Retries: 3
+          StartPeriod: 30
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group:
+              Ref: FargateLogGroup
+            awslogs-region:
+              Ref: AWS::Region
+            awslogs-stream-prefix: backend
+  FrontendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: portfolio-practice-frontend
+      RequiresCompatibilities:
+      - FARGATE
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn:
+        Fn::GetAtt:
+        - TaskExecutionRole
+        - Arn
+      ContainerDefinitions:
+      - Name: frontend
+        Image:
+          Ref: FrontendImageUri
+        Essential: true
+        PortMappings:
+        - ContainerPort: 80
+          Protocol: tcp
+        HealthCheck:
+          Command:
+          - CMD-SHELL
+          - wget -q -O /dev/null http://127.0.0.1/ || exit 1
+          Interval: 30
+          Timeout: 5
+          Retries: 3
+          StartPeriod: 30
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group:
+              Ref: FargateLogGroup
+            awslogs-region:
+              Ref: AWS::Region
+            awslogs-stream-prefix: frontend
+  BackendTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Portfolio Fargate port 8000 from ALB only
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8000
+        ToPort: 8000
+        SourceSecurityGroupId:
+          Ref: AlbSecurityGroupId
+        Description: Requests and health checks from ALB only
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+        Description: HTTPS to ECR, SSM, CloudWatch and X-Ray
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: 5432
+        DestinationSecurityGroupId:
+          Ref: DatabaseSecurityGroupId
+        Description: PostgreSQL to existing RDS
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+  FrontendTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Portfolio Fargate port 80 from ALB only
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        SourceSecurityGroupId:
+          Ref: AlbSecurityGroupId
+        Description: Requests and health checks from ALB only
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+        Description: HTTPS to ECR, SSM, CloudWatch and X-Ray
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+  DatabaseFromFargate:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: DatabaseSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId:
+        Ref: BackendTaskSecurityGroup
+      Description: Portfolio Fargate backend PostgreSQL access
+  FargateBackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8000
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: traffic-port
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '30'
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+  FargateFrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: 80
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: traffic-port
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '30'
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+  BackendHealthRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: HttpsListenerArn
+      Priority: 1
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - /health
+      Actions:
+      - Type: forward
+        ForwardConfig:
+          TargetGroups:
+          - TargetGroupArn:
+              Ref: Ec2BackendTargetGroupArn
+            Weight:
+              Fn::If:
+              - UseFargate
+              - 0
+              - 1
+          - TargetGroupArn:
+              Ref: FargateBackendTargetGroup
+            Weight:
+              Fn::If:
+              - UseFargate
+              - 1
+              - 0
+          TargetGroupStickinessConfig:
+            Enabled: false
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+  BackendApiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: HttpsListenerArn
+      Priority: 2
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - /api/*
+      Actions:
+      - Type: forward
+        ForwardConfig:
+          TargetGroups:
+          - TargetGroupArn:
+              Ref: Ec2BackendTargetGroupArn
+            Weight:
+              Fn::If:
+              - UseFargate
+              - 0
+              - 1
+          - TargetGroupArn:
+              Ref: FargateBackendTargetGroup
+            Weight:
+              Fn::If:
+              - UseFargate
+              - 1
+              - 0
+          TargetGroupStickinessConfig:
+            Enabled: false
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+  FrontendRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: HttpsListenerArn
+      Priority: 3
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - /*
+      Actions:
+      - Type: forward
+        ForwardConfig:
+          TargetGroups:
+          - TargetGroupArn:
+              Ref: Ec2FrontendTargetGroupArn
+            Weight:
+              Fn::If:
+              - UseFargate
+              - 0
+              - 1
+          - TargetGroupArn:
+              Ref: FargateFrontendTargetGroup
+            Weight:
+              Fn::If:
+              - UseFargate
+              - 1
+              - 0
+          TargetGroupStickinessConfig:
+            Enabled: false
+  BackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - BackendHealthRule
+    - BackendApiRule
+    - DatabaseFromFargate
+    Properties:
+      ServiceName: portfolio-practice-backend
+      Cluster:
+        Ref: PortfolioCluster
+      TaskDefinition:
+        Ref: BackendTaskDefinition
+      LaunchType: FARGATE
+      PlatformVersion: 1.4.0
+      DesiredCount:
+        Ref: FargateDesiredCount
+      EnableExecuteCommand: false
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            Ref: PublicSubnetIds
+          SecurityGroups:
+          - Ref: BackendTaskSecurityGroup
+      LoadBalancers:
+      - ContainerName: backend
+        ContainerPort: 8000
+        TargetGroupArn:
+          Ref: FargateBackendTargetGroup
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+  FrontendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - FrontendRule
+    Properties:
+      ServiceName: portfolio-practice-frontend
+      Cluster:
+        Ref: PortfolioCluster
+      TaskDefinition:
+        Ref: FrontendTaskDefinition
+      LaunchType: FARGATE
+      PlatformVersion: 1.4.0
+      DesiredCount:
+        Ref: FargateDesiredCount
+      EnableExecuteCommand: false
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            Ref: PublicSubnetIds
+          SecurityGroups:
+          - Ref: FrontendTaskSecurityGroup
+      LoadBalancers:
+      - ContainerName: frontend
+        ContainerPort: 80
+        TargetGroupArn:
+          Ref: FargateFrontendTargetGroup
+      Tags:
+      - Key: Project
+        Value: portfolio
+      - Key: Environment
+        Value: practice
+Outputs:
+  ClusterName:
+    Description: ECS cluster for the Fargate deployment
+    Value:
+      Ref: PortfolioCluster
+  ActiveDeployment:
+    Description: Current ALB routing selection
+    Value:
+      Ref: ActiveDeployment
+  FargateDesiredCount:
+    Description: Tasks requested per Fargate service
+    Value:
+      Ref: FargateDesiredCount
+  BackendServiceName:
+    Description: Backend practice ECS service
+    Value:
+      Fn::GetAtt:
+      - BackendService
+      - Name
+  FrontendServiceName:
+    Description: Frontend practice ECS service
+    Value:
+      Fn::GetAtt:
+      - FrontendService
+      - Name
+  FargateBackendTargetGroupArn:
+    Description: Check backend targets before switching
+    Value:
+      Ref: FargateBackendTargetGroup
+  FargateFrontendTargetGroupArn:
+    Description: Check frontend targets before switching
+    Value:
+      Ref: FargateFrontendTargetGroup
+Conditions:
+  UseFargate:
+    Fn::Equals:
+    - Ref: ActiveDeployment
+    - fargate
+Rules:
+  RequireRunningFargate:
+    RuleCondition:
+      Fn::Equals:
+      - Ref: ActiveDeployment
+      - fargate
+    Assertions:
+    - Assert:
+        Fn::Equals:
+        - Ref: FargateDesiredCount
+        - '1'
+      AssertDescription: Start both Fargate services before routing traffic to Fargate.

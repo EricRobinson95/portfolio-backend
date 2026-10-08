@@ -1,0 +1,16 @@
+[
+  {
+    "ResourceType": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    "LogicalResourceId": "BackendHealthRule",
+    "ResourceIdentifier": {
+      "RuleArn": "arn:aws:elasticloadbalancing:us-east-2:327425719636:listener-rule/app/portfolio-app-alb/4073372cf4a16442/24ffb8436bb9a7b4/6a89aa18b5d02f15"
+    }
+  },
+  {
+    "ResourceType": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    "LogicalResourceId": "BackendApiRule",
+    "ResourceIdentifier": {
+      "RuleArn": "arn:aws:elasticloadbalancing:us-east-2:327425719636:listener-rule/app/portfolio-app-alb/4073372cf4a16442/24ffb8436bb9a7b4/6db60d53528f1d5e"
+    }
+  }
+]
