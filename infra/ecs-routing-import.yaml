@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Portfolio ECS Fargate deployment
+Parameters:
+  BackendImageUri:
+    Type: String
+    Description: Backend image to run on Fargate
+    Default: 327425719636.dkr.ecr.us-east-2.amazonaws.com/portfolio-backend@sha256:d4c29ddb98ddc109daac1cbd075ce37000c76068f58d67e78839a821a6a0a1b7
+  CollectorImageUri:
+    Type: String
+    Description: Collector image to run alongside the backend
+    Default: 327425719636.dkr.ecr.us-east-2.amazonaws.com/portfolio-otel:fargate-v1
+Resources:
+  PortfolioCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: portfolio-fargate
+      CapacityProviders:
+      - FARGATE
+      DefaultCapacityProviderStrategy:
+      - CapacityProvider: FARGATE
+        Weight: 1
+      ClusterSettings:
+      - Name: containerInsights
+        Value: disabled
+      Tags:
+      - Key: Project
+        Value: portfolio
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+      - PolicyName: ReadBackendParameters
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - ssm:GetParameters
+            Resource:
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/admin-password
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/admin-username
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/cloudfront-domain
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/database-url
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/s3-bucket
+            - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/portfolio/production/backend/secret-key
+  BackendTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+          Action: sts:AssumeRole
+          Condition:
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+      Policies:
+      - PolicyName: ExportBackendTraces
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+  CollectorRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: portfolio-otel
+      ImageTagMutability: IMMUTABLE
+      EncryptionConfiguration:
+        EncryptionType: AES256
+  BackendHealthRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ListenerArn: arn:aws:elasticloadbalancing:us-east-2:327425719636:listener/app/portfolio-app-alb/4073372cf4a16442/24ffb8436bb9a7b4
+      Priority: 1
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - /health
+      Actions:
+      - Type: forward
+        TargetGroupArn: arn:aws:elasticloadbalancing:us-east-2:327425719636:targetgroup/portfolio-backend-tg/16ff7a5745011e42
+  BackendApiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ListenerArn: arn:aws:elasticloadbalancing:us-east-2:327425719636:listener/app/portfolio-app-alb/4073372cf4a16442/24ffb8436bb9a7b4
+      Priority: 2
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - /api/*
+      Actions:
+      - Type: forward
+        TargetGroupArn: arn:aws:elasticloadbalancing:us-east-2:327425719636:targetgroup/portfolio-backend-tg/16ff7a5745011e42
+Outputs:
+  ClusterName:
+    Description: ECS cluster for the Fargate deployment
+    Value:
+      Ref: PortfolioCluster
