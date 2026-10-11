@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Weekday start and stop schedules for the portfolio EC2 instance
+
+Parameters:
+  InstanceId:
+    Type: AWS::EC2::Instance::Id
+    Default: i-068ba6708472b588f
+    Description: Existing portfolio EC2 instance to start and stop
+  ScheduleTimezone:
+    Type: String
+    Default: America/Chicago
+    Description: IANA timezone for the schedules, including daylight saving adjustments
+  ScheduleState:
+    Type: String
+    Default: ENABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Enable both schedules or pause both without deleting them
+
+Resources:
+  PortfolioScheduleGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Tags:
+        - Key: Project
+          Value: portfolio
+        - Key: Environment
+          Value: production
+
+  SchedulerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !GetAtt PortfolioScheduleGroup.Arn
+      Policies:
+        - PolicyName: StartStopPortfolioInstance
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${InstanceId}
+
+  StartPortfolioInstance:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Start portfolio EC2 at 8 AM and 4 PM Monday through Friday
+      GroupName: !Ref PortfolioScheduleGroup
+      ScheduleExpression: "cron(0 8,16 ? * MON-FRI *)"
+      ScheduleExpressionTimezone: !Ref ScheduleTimezone
+      State: !Ref ScheduleState
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:startInstances
+        RoleArn: !GetAtt SchedulerExecutionRole.Arn
+        Input: !Sub '{"InstanceIds":["${InstanceId}"]}'
+        # Limit late retries so an old start cannot run hours after its window.
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 300
+          MaximumRetryAttempts: 2
+
+  StopPortfolioInstance:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Stop portfolio EC2 at 1 PM and 6 PM Monday through Friday
+      GroupName: !Ref PortfolioScheduleGroup
+      ScheduleExpression: "cron(0 13,18 ? * MON-FRI *)"
+      ScheduleExpressionTimezone: !Ref ScheduleTimezone
+      State: !Ref ScheduleState
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances
+        RoleArn: !GetAtt SchedulerExecutionRole.Arn
+        Input: !Sub '{"InstanceIds":["${InstanceId}"]}'
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 300
+          MaximumRetryAttempts: 2
+
+Outputs:
+  ScheduledInstanceId:
+    Description: EC2 instance controlled by these schedules
+    Value: !Ref InstanceId
+  Timezone:
+    Description: Timezone used for all four weekday actions
+    Value: !Ref ScheduleTimezone
+  ScheduleState:
+    Description: Current state of both schedules
+    Value: !Ref ScheduleState
+  ScheduleGroupName:
+    Description: Group containing the start and stop schedules
+    Value: !Ref PortfolioScheduleGroup
+  StartScheduleName:
+    Description: Starts EC2 Monday through Friday at 8 AM and 4 PM
+    Value: !Ref StartPortfolioInstance
+  StopScheduleName:
+    Description: Stops EC2 Monday through Friday at 1 PM and 6 PM
+    Value: !Ref StopPortfolioInstance
